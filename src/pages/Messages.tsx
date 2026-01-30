@@ -45,7 +45,7 @@ import {
   type Conversation,
   type Message
 } from '@/hooks/useMessaging';
-import { Send, MessageCircle, ArrowLeft, Circle, Plus, Search, UserPlus, MoreVertical, Trash2 } from 'lucide-react';
+import { Send, MessageCircle, ArrowLeft, Circle, Plus, Search, UserPlus, MoreVertical, Trash2, Copy, Eraser } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -80,6 +80,7 @@ export default function Messages() {
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
   const [deleteMessageDialogOpen, setDeleteMessageDialogOpen] = useState(false);
+  const [clearChatDialogOpen, setClearChatDialogOpen] = useState(false);
 
   const isSessionError = (err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
@@ -426,6 +427,37 @@ export default function Messages() {
     setDeleteMessageDialogOpen(true);
   };
 
+  // Copy message to clipboard
+  const copyMessage = (content: string) => {
+    navigator.clipboard.writeText(content);
+    toast({ title: 'Message copied to clipboard' });
+  };
+
+  // Clear all messages in current conversation
+  const handleClearChat = async () => {
+    if (!selectedConversation) return;
+
+    try {
+      // Delete all messages by calling delete for each message
+      const messagesToDelete = messages.filter(m => m.sender_id === user?.id);
+      
+      for (const msg of messagesToDelete) {
+        await deleteMessage(msg.id);
+      }
+
+      // Refresh messages
+      await fetchMessages(selectedConversation.id);
+      fetchConversations();
+
+      toast({ title: 'Your messages cleared successfully' });
+    } catch (error) {
+      console.error('Error clearing chat:', error);
+      toast({ title: 'Error clearing messages', variant: 'destructive' });
+    } finally {
+      setClearChatDialogOpen(false);
+    }
+  };
+
   if (loading) {
     return (
       <MainLayout>
@@ -627,7 +659,7 @@ export default function Messages() {
                         {selectedConversation.other_user?.full_name?.charAt(0) || 'U'}
                       </AvatarFallback>
                     </Avatar>
-                    <div>
+                    <div className="flex-1">
                       <p className="font-semibold text-foreground">
                         {selectedConversation.other_user?.full_name || 'Unknown'}
                       </p>
@@ -635,6 +667,27 @@ export default function Messages() {
                         {selectedConversation.other_user?.is_online ? 'Online' : 'Offline'}
                       </p>
                     </div>
+                    {/* Chat Options Menu */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <MoreVertical className="h-5 w-5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setClearChatDialogOpen(true)}>
+                          <Eraser className="h-4 w-4 mr-2" />
+                          Clear My Messages
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={(e) => openDeleteDialog(e, selectedConversation.id)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete Chat
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
 
                   {/* Messages */}
@@ -654,29 +707,33 @@ export default function Messages() {
                               "flex items-center gap-1",
                               isOwnMessage ? "flex-row" : "flex-row-reverse"
                             )}>
-                              {/* Delete button - only for own messages */}
-                              {isOwnMessage && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
-                                      <MoreVertical className="h-3 w-3" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
+                              {/* Message options menu */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                    <MoreVertical className="h-3 w-3" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align={isOwnMessage ? "end" : "start"}>
+                                  <DropdownMenuItem onClick={() => copyMessage(msg.content)}>
+                                    <Copy className="h-4 w-4 mr-2" />
+                                    Copy
+                                  </DropdownMenuItem>
+                                  {isOwnMessage && (
                                     <DropdownMenuItem
                                       className="text-destructive focus:text-destructive"
                                       onClick={() => openDeleteMessageDialog(msg.id)}
                                     >
                                       <Trash2 className="h-4 w-4 mr-2" />
-                                      Delete Message
+                                      Delete
                                     </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                               <div
                                 className={cn(
                                   "max-w-[70%] rounded-2xl px-4 py-2",
@@ -780,6 +837,27 @@ export default function Messages() {
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Clear Chat Confirmation Dialog */}
+        <AlertDialog open={clearChatDialogOpen} onOpenChange={setClearChatDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear your messages?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will delete all messages you sent in this conversation. The other person's messages will remain. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleClearChat}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Clear
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
