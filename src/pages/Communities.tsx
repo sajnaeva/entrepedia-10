@@ -21,6 +21,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Users, UserPlus, UserMinus, Crown, Edit, Trash2, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { ImageUpload } from '@/components/ui/image-upload';
 
 interface Community {
   id: string;
@@ -46,6 +47,8 @@ export default function Communities() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingCommunity, setEditingCommunity] = useState<Community | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   
   // Form state
   const [name, setName] = useState('');
@@ -219,6 +222,26 @@ export default function Communities() {
     try {
       const stored = localStorage.getItem('samrambhak_auth');
       const sessionToken = stored ? JSON.parse(stored).session_token : null;
+
+      // First upload the image if there's one pending
+      if (pendingImageFile && editingCommunity.id) {
+        setUploadingImage(true);
+        const formData = new FormData();
+        formData.append('file', pendingImageFile);
+        formData.append('bucket_type', 'communities');
+        formData.append('entity_id', editingCommunity.id);
+        formData.append('image_type', 'cover');
+
+        const { data: uploadData, error: uploadError } = await supabase.functions.invoke('upload-image', {
+          body: formData,
+          headers: sessionToken ? { 'x-session-token': sessionToken } : {},
+        });
+
+        if (uploadError) throw uploadError;
+        if (uploadData?.error) throw new Error(uploadData.error);
+        setUploadingImage(false);
+      }
+
       const { data, error } = await supabase.functions.invoke('manage-community', {
         body: {
           action: 'update',
@@ -237,11 +260,13 @@ export default function Communities() {
       setEditingCommunity(null);
       setName('');
       setDescription('');
+      setPendingImageFile(null);
       fetchCommunities();
     } catch (error: any) {
       toast({ title: 'Error updating community', description: error.message, variant: 'destructive' });
     } finally {
       setSaving(false);
+      setUploadingImage(false);
     }
   };
 
@@ -419,6 +444,7 @@ export default function Communities() {
             setEditingCommunity(null);
             setName('');
             setDescription('');
+            setPendingImageFile(null);
           }
         }}>
           <DialogContent className="sm:max-w-md">
@@ -426,6 +452,19 @@ export default function Communities() {
               <DialogTitle>Edit Community</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
+              {/* Cover Image Upload */}
+              <div className="space-y-2">
+                <Label>Cover Image</Label>
+                <ImageUpload
+                  currentImageUrl={editingCommunity?.cover_image_url}
+                  onImageSelect={(file) => setPendingImageFile(file)}
+                  onImageRemove={() => setPendingImageFile(null)}
+                  uploading={uploadingImage}
+                  variant="cover"
+                  fallbackText={editingCommunity?.name || 'C'}
+                />
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="edit-community-name">Community Name *</Label>
                 <Input
@@ -450,7 +489,7 @@ export default function Communities() {
               <Button 
                 onClick={handleUpdateCommunity} 
                 className="w-full gradient-primary text-white"
-                disabled={saving}
+                disabled={saving || uploadingImage}
               >
                 {saving ? 'Saving...' : 'Save Changes'}
               </Button>
@@ -489,13 +528,13 @@ function CommunityCard({
         style={community.cover_image_url ? { backgroundImage: `url(${community.cover_image_url})` } : {}}
       />
       
-      {/* Creator action buttons */}
+      {/* Creator action buttons - always visible on mobile, hover on desktop */}
       {community.is_creator && (
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+        <div className="absolute top-2 right-2 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           <Button
             size="icon"
             variant="secondary"
-            className="h-8 w-8"
+            className="h-8 w-8 bg-background/80 backdrop-blur-sm"
             onClick={(e) => {
               e.stopPropagation();
               onEdit();

@@ -27,6 +27,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Building2, MapPin, Users, Edit, Trash2 } from 'lucide-react';
+import { ImageUpload } from '@/components/ui/image-upload';
 import type { Database } from '@/integrations/supabase/types';
 
 type BusinessCategory = Database['public']['Enums']['business_category'];
@@ -66,6 +67,8 @@ export default function MyBusinesses() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingBusiness, setEditingBusiness] = useState<Business | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [pendingLogoFile, setPendingLogoFile] = useState<File | null>(null);
   
   // Form state
   const [name, setName] = useState('');
@@ -198,6 +201,28 @@ export default function MyBusinesses() {
 
     setSaving(true);
     try {
+      const stored = localStorage.getItem('samrambhak_auth');
+      const sessionToken = stored ? JSON.parse(stored).session_token : null;
+
+      // First upload the logo if there's one pending
+      if (pendingLogoFile && editingBusiness.id) {
+        setUploadingLogo(true);
+        const formData = new FormData();
+        formData.append('file', pendingLogoFile);
+        formData.append('bucket_type', 'businesses');
+        formData.append('entity_id', editingBusiness.id);
+        formData.append('image_type', 'logo');
+
+        const { data: uploadData, error: uploadError } = await supabase.functions.invoke('upload-image', {
+          body: formData,
+          headers: sessionToken ? { 'x-session-token': sessionToken } : {},
+        });
+
+        if (uploadError) throw uploadError;
+        if (uploadData?.error) throw new Error(uploadData.error);
+        setUploadingLogo(false);
+      }
+
       // Use edge function to bypass RLS
       const response = await supabase.functions.invoke('manage-business', {
         body: {
@@ -223,11 +248,13 @@ export default function MyBusinesses() {
       setEditDialogOpen(false);
       setEditingBusiness(null);
       resetForm();
+      setPendingLogoFile(null);
       fetchBusinesses();
     } catch (error: any) {
       toast({ title: 'Error updating business', description: error.message, variant: 'destructive' });
     } finally {
       setSaving(false);
+      setUploadingLogo(false);
     }
   };
 
@@ -393,11 +420,12 @@ export default function MyBusinesses() {
                       </div>
                     </div>
                     
-                    {/* Action buttons */}
-                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                    {/* Action buttons - always visible on mobile, hover on desktop */}
+                    <div className="absolute top-4 right-4 flex gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <Button
                         size="icon"
                         variant="secondary"
+                        className="bg-background/80 backdrop-blur-sm"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleEditBusiness(business);
@@ -446,6 +474,7 @@ export default function MyBusinesses() {
           if (!open) {
             setEditingBusiness(null);
             resetForm();
+            setPendingLogoFile(null);
           }
         }}>
           <DialogContent className="sm:max-w-md">
@@ -453,6 +482,21 @@ export default function MyBusinesses() {
               <DialogTitle>Edit Business</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
+              {/* Logo Upload */}
+              <div className="space-y-2">
+                <Label>Business Logo</Label>
+                <div className="flex justify-center">
+                  <ImageUpload
+                    currentImageUrl={editingBusiness?.logo_url}
+                    onImageSelect={(file) => setPendingLogoFile(file)}
+                    onImageRemove={() => setPendingLogoFile(null)}
+                    uploading={uploadingLogo}
+                    variant="avatar"
+                    fallbackText={editingBusiness?.name || 'B'}
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="edit-name">Business Name *</Label>
                 <Input
@@ -503,7 +547,7 @@ export default function MyBusinesses() {
               <Button 
                 onClick={handleUpdateBusiness} 
                 className="w-full gradient-primary text-white"
-                disabled={saving}
+                disabled={saving || uploadingLogo}
               >
                 {saving ? 'Saving...' : 'Save Changes'}
               </Button>
